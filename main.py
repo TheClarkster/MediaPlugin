@@ -557,7 +557,7 @@ class ThumbnailBackground(MediaAction):
             except (OSError, ValueError):
                 pass  # Timeout may have already fired or invalid ID
         
-        timeout = self.plugin_base.get_settings().get(KEY_COMPOSITE_TIMEOUT, DEFAULT_COMPOSITE_TIMEOUT)
+        timeout = int(self.plugin_base.get_settings().get(KEY_COMPOSITE_TIMEOUT, DEFAULT_COMPOSITE_TIMEOUT))
         log.trace(f"ThumbnailBackground: _request_composite - scheduling {timeout}ms timeout")
         ThumbnailBackground._idle_composite_id = GLib.timeout_add(
             timeout,  # milliseconds
