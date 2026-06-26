@@ -449,23 +449,46 @@ class MediaDial(MediaAction):
     # and the pace -- shorter = faster glide (and smoother), longer = slower glide.
     REPAINT_INTERVAL_MS = 90
 
+    # Minimum gap between dial-driven track changes. A physical dial emits a
+    # flurry of TURN events during a single quick flick; without this throttle,
+    # one flick skips a fistful of tracks. We act on the first turn instantly
+    # (leading edge) and then ignore further turns until the cooldown elapses,
+    # so a fast spin advances at most one track per window while slow,
+    # deliberate turns still register one-for-one.
+    TURN_COOLDOWN_US = 350_000  # 350 ms
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._repaint_timer_id = None
         self._last_state_key = None
+        self._last_turn_us = 0
+        self._last_turn_dir = 0
 
     # -- Input -------------------------------------------------------------
     def event_callback(self, event, data: dict = None):
         player = self.get_player_name()
         if event == Input.Dial.Events.TURN_CW:
-            self.plugin_base.mc.next(player)
+            self._on_turn(player, +1)
         elif event == Input.Dial.Events.TURN_CCW:
-            self.plugin_base.mc.previous(player)
+            self._on_turn(player, -1)
         elif event in (Input.Dial.Events.SHORT_UP, Input.Key.Events.SHORT_UP):
             self.toggle_play_pause(player)
         else:
             # Key/dial DOWN/UP, hold, touchscreen, etc.
             super().event_callback(event, data)
+
+    def _on_turn(self, player, direction):
+        # Throttle bursts (see TURN_COOLDOWN_US). A direction reversal fires
+        # immediately so flicking back the other way feels responsive.
+        now = GLib.get_monotonic_time()
+        if direction == self._last_turn_dir and now - self._last_turn_us < self.TURN_COOLDOWN_US:
+            return
+        self._last_turn_us = now
+        self._last_turn_dir = direction
+        if direction > 0:
+            self.plugin_base.mc.next(player)
+        else:
+            self.plugin_base.mc.previous(player)
 
     def toggle_play_pause(self, player):
         status = self.plugin_base.mc.status(player)

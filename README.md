@@ -36,6 +36,15 @@ smoother, longer is slower. A faint once-a-second hitch can appear when another 
 shared touch strip; removing it entirely would mean poking fragile engine internals, so it's left
 as-is.
 
+### Dial sensitivity
+
+A quick flick of the dial emits a *burst* of turn events — StreamController fires one event per
+detent and does no debouncing of its own (it doesn't even forward the rotation's tick count), so
+turning a lot would otherwise skip a fistful of tracks at once. The action throttles them: it acts
+on the first turn immediately, then ignores further turns until a short cooldown elapses
+(`MediaDial.TURN_COOLDOWN_US`, 350 ms). A fast spin advances about one track per window, while
+slow, deliberate turns still register one-for-one, and reversing direction responds instantly.
+
 All original actions (Play, Pause, Play/Pause, Next, Previous, Info, Thumbnail Background) are
 still included. This fork uses a separate plugin id (`dev_clark_MediaDial`) so it can be installed
 alongside the official Media plugin without conflicting.
