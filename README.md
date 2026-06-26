@@ -15,13 +15,18 @@ A combined **Media (Dial)** action, designed for a dial (such as the Stream Deck
 | Turn clockwise | Next track |
 | Turn counter-clockwise | Previous track |
 | Press (short) | Play / Pause |
-| LCD screen | Album art, with the song title and artist over it |
+| LCD screen | Album art (blurred-fill background), with the song title and artist over it |
 
 ### LCD display
 
-The dial's LCD shows the **album art** as the background (falling back to a dimmed play/pause
-glyph when there's no art or nothing is playing), with the **song title** (top) and **artist**
-(bottom) over it. Names too wide for the cell scroll horizontally.
+The dial's LCD shows the **album art**, with the **song title** (top) and **artist** (bottom)
+over it (falling back to a dimmed play/pause glyph when there's no art or nothing is playing).
+Names too wide for the cell scroll horizontally.
+
+Because the LCD cell is wide (~2:1) but covers are square, the sharp cover is centered and the
+empty sides are filled with a **zoomed, blurred, dimmed copy of the cover** — so the strip picks
+up the album's colours instead of showing black bars. Blur strength and the background dimming are
+constants in `MediaDial._compose_art_cell`.
 
 The scrolling uses StreamController's own rolling-label feature, but the engine doesn't refresh a
 scroll-only dial often enough on its own (its animation tick only wakes for key/background video,

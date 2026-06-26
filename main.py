@@ -17,7 +17,7 @@ from gi.repository import Gtk, Adw, GLib
 import sys
 import os
 import io
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 
 import globals as gl
 
@@ -542,6 +542,34 @@ class MediaDial(MediaAction):
             return first
         return None
 
+    def _cell_size(self):
+        """The dial's LCD cell size (the touch strip split across the dials)."""
+        try:
+            w, h = self.deck_controller.get_touchscreen_image_size()
+            n = len(self.deck_controller.inputs[Input.Dial]) or 1
+            return (max(1, w // n), h)
+        except Exception:
+            return (200, 100)  # Stream Deck Plus: 800x100 strip / 4 dials
+
+    def _compose_art_cell(self, art):
+        """Fit the square cover onto the wide dial cell with a zoomed, blurred,
+        dimmed copy of itself filling the letterbox sides -- so the strip shows the
+        album's colours instead of black bars, with the sharp cover centered."""
+        w, h = self._cell_size()
+        art = art.convert("RGBA")
+
+        # Blurred fill: cover the whole cell (crop to aspect), blur, then dim so
+        # the sharp cover and the labels stay readable on top.
+        cell = ImageOps.fit(art, (w, h), Image.Resampling.LANCZOS)
+        cell = cell.filter(ImageFilter.GaussianBlur(radius=max(6, h // 6)))
+        cell = ImageEnhance.Brightness(cell).enhance(0.5)
+
+        # Sharp square cover, full cell height, centered.
+        side = h
+        cover = art.resize((side, side), Image.Resampling.LANCZOS)
+        cell.paste(cover, ((w - side) // 2, (h - side) // 2), cover)
+        return cell
+
     def update_image(self):
         settings = self.get_settings()
         if settings is None:
@@ -573,7 +601,7 @@ class MediaDial(MediaAction):
         media = None
         if art_source is not None:
             try:
-                media = Image.open(art_source)
+                media = self._compose_art_cell(Image.open(art_source))
             except Exception:
                 media = None
         if media is None:
