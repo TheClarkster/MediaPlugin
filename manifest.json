@@ -1,13 +1,13 @@
 {
     "version": "1.0.0",
     "thumbnail": "store/Thumbnail.png",
-    "id": "com_core447_MediaPlugin",
-    "name": "Media",
+    "id": "dev_clark_MediaDial",
+    "name": "Media (Dial)",
     "descriptions": {
-        "en_US": "See and control the state of your media players. If the current player provides a thumbnail it will also be shown."
+        "en_US": "Fork of the Media plugin with full dial support: turn to skip tracks, press to play/pause, and show album art on the LCD. All original button actions are still included."
     },
     "short-descriptions": {
-        "en_US": "Control your media players"
+        "en_US": "Media control with dial support"
     },
     "tags": "Audio",
     "minimum-version": "1.0.0",

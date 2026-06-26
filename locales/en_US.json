@@ -1,5 +1,5 @@
 {
-    "plugin.name": "Media",
+    "plugin.name": "Media (Dial)",
     "actions.play.name": "Play",
     "actions.pause.name": "Pause",
     "actions.play-pause.name": "Play/Pause",
@@ -7,6 +7,7 @@
     "actions.previous.name": "Previous",
     "actions.info.name": "Info",
     "actions.thumbnail.name": "Thumbnail Background",
+    "actions.media-dial.name": "Media (Dial)",
     "actions.media-action.bind-to-player.label": "Bind to player",
     "actions.media-action.bind-to-player.subtitle": "Specify the player to control",
     "actions.media-action.show-name-switch.label": "Show name of the playing song",

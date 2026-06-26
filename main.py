@@ -428,6 +428,107 @@ class Info(MediaAction):
         # Update image
         self.set_center_label(self.get_settings().get("seperator_text", "--"), font_size=12)
 
+class MediaDial(MediaAction):
+    """Combined media control designed for a dial (works on a key too):
+
+      * Turn clockwise         -> next track
+      * Turn counter-clockwise -> previous track
+      * Press (short)          -> play / pause toggle
+      * LCD                    -> album art (falls back to a play/pause glyph)
+
+    All of the underlying behaviour already exists in MediaController; this action
+    just wires the dial's rotation and press events to it, since the deprecated
+    ActionBase.event_callback only maps dial DOWN/UP and ignores turn events.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    # -- Input -------------------------------------------------------------
+    def event_callback(self, event, data: dict = None):
+        player = self.get_player_name()
+        if event == Input.Dial.Events.TURN_CW:
+            self.plugin_base.mc.next(player)
+        elif event == Input.Dial.Events.TURN_CCW:
+            self.plugin_base.mc.previous(player)
+        elif event in (Input.Dial.Events.SHORT_UP, Input.Key.Events.SHORT_UP):
+            self.toggle_play_pause(player)
+        else:
+            # Key/dial DOWN/UP, hold, touchscreen, etc.
+            super().event_callback(event, data)
+
+    def toggle_play_pause(self, player):
+        status = self.plugin_base.mc.status(player)
+        if isinstance(status, list):
+            status = status[0] if status else None
+        if status == "Playing":
+            self.plugin_base.mc.pause(player)
+        else:
+            # Covers Paused, Stopped and unknown/None states.
+            self.plugin_base.mc.play(player)
+        self.update_image()
+
+    # -- Display -----------------------------------------------------------
+    def on_ready(self):
+        self.update_image()
+
+    def on_tick(self):
+        self.update_image()
+
+    def get_thumbnail_image(self, player):
+        """Load the current album art as a PIL image, or None if unavailable."""
+        thumbnail = self.plugin_base.mc.thumbnail(player)
+        if not isinstance(thumbnail, list) or not thumbnail:
+            return None
+        first = thumbnail[0]
+        try:
+            if isinstance(first, io.BytesIO):
+                return Image.open(first)
+            if isinstance(first, str) and first.lower() != "none" and os.path.isfile(first):
+                return Image.open(first)
+        except Exception:
+            return None
+        return None
+
+    def update_image(self):
+        settings = self.get_settings()
+        if settings is None:
+            # Page not yet fully loaded
+            return
+
+        player = self.get_player_name()
+
+        # The LCD shows the album art. When there is no art (or nothing playing)
+        # fall back to a play/pause glyph reflecting the current state so the
+        # dial is never blank.
+        media = None
+        if settings.setdefault("show_thumbnail", True):
+            media = self.get_thumbnail_image(player)
+
+        if media is None:
+            status = self.plugin_base.mc.status(player)
+            if isinstance(status, list):
+                status = status[0] if status else None
+            icon_name = "pause.png" if status == "Playing" else "play.png"
+            icon = Image.open(os.path.join(self.plugin_base.PATH, "assets", icon_name))
+            if status is None:
+                icon = ImageEnhance.Brightness(icon).enhance(0.6)
+            media = self.generate_image(icon=icon, size=0.75)
+
+        # Optionally show the song title on the LCD label.
+        if settings.setdefault("show_label", True):
+            title = self.plugin_base.mc.title(player)
+            if isinstance(title, list):
+                title = title[0] if title else None
+            label = self.shorten_label(str(title), 12) if title else None
+            self.set_bottom_label(label, font_size=12, update=False)
+        else:
+            self.set_bottom_label(None, update=False)
+
+        # Set media + label, then composite once to avoid a stale intermediate frame.
+        self.set_media(image=media, update=False)
+        self.get_input().update()
+
 class ThumbnailBackground(MediaAction):
     """
     Media action that renders one or more thumbnail images onto the deck background.
@@ -1374,6 +1475,19 @@ class MediaPlugin(PluginBase):
             }
         )
         self.add_action_holder(self.thumbnail_holder)
+
+        self.media_dial_holder = ActionHolder(
+            plugin_base=self,
+            action_base=MediaDial, # type: ignore[arg-type]
+            action_id_suffix="MediaDial",
+            action_name=self.lm.get("actions.media-dial.name"),
+            action_support={
+                Input.Key: ActionInputSupport.SUPPORTED,
+                Input.Dial: ActionInputSupport.SUPPORTED,
+                Input.Touchscreen: ActionInputSupport.UNSUPPORTED
+            }
+        )
+        self.add_action_holder(self.media_dial_holder)
 
         self.register(
             plugin_name=self.lm.get("plugin.name"),

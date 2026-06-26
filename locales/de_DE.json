@@ -1,5 +1,5 @@
 {
-    "plugin.name": "Medien",
+    "plugin.name": "Medien (Regler)",
     "actions.play.name": "Play",
     "actions.pause.name": "Pause",
     "actions.play-pause.name": "Play/Pause",
@@ -22,5 +22,6 @@
     "settings.composite-timeout.label": "Composite-Timeout",
     "settings.composite-timeout.subtitle": "Verzögerung vor dem Zusammensetzen von Miniaturbildern (ms)",
     "settings.log-level.label": "Log-Ebene",
-    "settings.log-level.subtitle": "Kontrollen Sie die Ausführlichkeit der Plugin-Protokollierung"
+    "settings.log-level.subtitle": "Kontrollen Sie die Ausführlichkeit der Plugin-Protokollierung",
+    "actions.media-dial.name": "Medien (Regler)"
 }
