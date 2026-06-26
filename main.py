@@ -441,8 +441,18 @@ class MediaDial(MediaAction):
     ActionBase.event_callback only maps dial DOWN/UP and ignores turn events.
     """
 
+    # How often we repaint the dial so StreamController's native rolling-label
+    # scroller advances. The deck only repaints a scroll-only dial ~1/s on its own
+    # (its 30fps tick path only wakes for key/background video, not dial scroll
+    # labels), so we pump redraws here. This interval also sets the scroll SPEED:
+    # the scroller steps a couple px per repaint, so this is both the frame time
+    # and the pace -- shorter = faster glide (and smoother), longer = slower glide.
+    REPAINT_INTERVAL_MS = 90
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._repaint_timer_id = None
+        self._last_state_key = None
 
     # -- Input -------------------------------------------------------------
     def event_callback(self, event, data: dict = None):
@@ -471,23 +481,65 @@ class MediaDial(MediaAction):
     # -- Display -----------------------------------------------------------
     def on_ready(self):
         self.update_image()
+        self._start_repaint_pump()
 
     def on_tick(self):
         self.update_image()
 
-    def get_thumbnail_image(self, player):
-        """Load the current album art as a PIL image, or None if unavailable."""
+    # -- Repaint pump: drives the NATIVE rolling-label scroll (no custom scroll
+    #    logic -- we only trigger redraws; StreamController does the scrolling). --
+    def _start_repaint_pump(self):
+        if self._repaint_timer_id is None:
+            self._repaint_timer_id = GLib.timeout_add(self.REPAINT_INTERVAL_MS, self._repaint_pump)
+
+    def _stop_repaint_pump(self):
+        if self._repaint_timer_id is not None:
+            try:
+                GLib.source_remove(self._repaint_timer_id)
+            except Exception:
+                pass
+            self._repaint_timer_id = None
+
+    def _repaint_pump(self):
+        # Repaint only while a label is actually scrolling, so a static (fitting)
+        # name doesn't get needless redraws. We only trigger the redraw here --
+        # StreamController's native scroller does all the scrolling math.
+        #
+        # Note: a shared-touchscreen recomposite from another dial's ~1/s update
+        # injects one extra scroll step a second (a faint pulse). Fully removing it
+        # needs to poke engine internals (a fragile media_ticks hack with no
+        # precedent in any public plugin), so we accept the minor blip instead.
+        if self.get_is_present() and self._is_scrolling():
+            self.get_input().update()
+        return True  # GLib: keep firing
+
+    def _is_scrolling(self):
+        """True when a label is wide enough that the native scroller is active."""
+        try:
+            state = self.get_state()
+            return bool(state is not None and state.label_manager.get_has_scroll_labels())
+        except Exception:
+            return False
+
+    def on_removed_from_cache(self):
+        self._stop_repaint_pump()
+
+    def on_remove(self):
+        self._stop_repaint_pump()
+
+    def __del__(self):
+        self._stop_repaint_pump()
+
+    def _art_source(self, player):
+        """Return the current album-art source (a file path or BytesIO), or None."""
         thumbnail = self.plugin_base.mc.thumbnail(player)
         if not isinstance(thumbnail, list) or not thumbnail:
             return None
         first = thumbnail[0]
-        try:
-            if isinstance(first, io.BytesIO):
-                return Image.open(first)
-            if isinstance(first, str) and first.lower() != "none" and os.path.isfile(first):
-                return Image.open(first)
-        except Exception:
-            return None
+        if isinstance(first, io.BytesIO):
+            return first
+        if isinstance(first, str) and first.lower() != "none" and os.path.isfile(first):
+            return first
         return None
 
     def update_image(self):
@@ -497,37 +549,65 @@ class MediaDial(MediaAction):
             return
 
         player = self.get_player_name()
+        show_thumb = settings.setdefault("show_thumbnail", True)
+        show_label = settings.setdefault("show_label", True)
 
-        # The LCD shows the album art. When there is no art (or nothing playing)
-        # fall back to a play/pause glyph reflecting the current state so the
-        # dial is never blank.
+        status = self.first(self.plugin_base.mc.status(player))
+        title = self.first(self.plugin_base.mc.title(player)) if show_label else None
+        artist = self.first(self.plugin_base.mc.artist(player)) if show_label else None
+        art_source = self._art_source(player) if show_thumb else None
+
+        # Change-detection: if the media state is unchanged, do nothing. Re-pushing
+        # media/labels every second triggers a repaint that advances the native
+        # scroll an extra step -- the once-a-second pulse. Skipping no-op updates
+        # leaves the 60ms pump as the sole repaint source while a song plays, so
+        # the scroll glides evenly. Art is keyed only by presence (it changes with
+        # the track, which title/artist already capture).
+        state_key = (status, title, artist, art_source is not None, show_thumb, show_label)
+        if state_key == self._last_state_key:
+            return
+        self._last_state_key = state_key
+
+        # The LCD shows the album art; fall back to a play/pause glyph (dimmed when
+        # nothing is playing) so the dial is never blank.
         media = None
-        if settings.setdefault("show_thumbnail", True):
-            media = self.get_thumbnail_image(player)
-
+        if art_source is not None:
+            try:
+                media = Image.open(art_source)
+            except Exception:
+                media = None
         if media is None:
-            status = self.plugin_base.mc.status(player)
-            if isinstance(status, list):
-                status = status[0] if status else None
             icon_name = "pause.png" if status == "Playing" else "play.png"
             icon = Image.open(os.path.join(self.plugin_base.PATH, "assets", icon_name))
             if status is None:
                 icon = ImageEnhance.Brightness(icon).enhance(0.6)
             media = self.generate_image(icon=icon, size=0.75)
 
-        # Optionally show the song title on the LCD label.
-        if settings.setdefault("show_label", True):
-            title = self.plugin_base.mc.title(player)
-            if isinstance(title, list):
-                title = title[0] if title else None
-            label = self.shorten_label(str(title), 12) if title else None
-            self.set_bottom_label(label, font_size=12, update=False)
+        # Song title (top) and artist (bottom), stacked over the art. We send the
+        # FULL text and let StreamController's built-in rolling-labels feature
+        # scroll anything too wide for the cell (ControllerDial re-renders while
+        # get_has_scroll_labels() is true) -- no custom marquee. The label system
+        # adds a black outline by default, so white text stays legible over art.
+        if show_label:
+            self.set_top_label(title, font_size=18, font_weight=700, update=False)
+            self.set_bottom_label(artist, font_size=16, color=[210, 210, 210, 255], update=False)
         else:
+            self.set_top_label(None, update=False)
             self.set_bottom_label(None, update=False)
 
-        # Set media + label, then composite once to avoid a stale intermediate frame.
+        # update=False avoids a stale intermediate frame. While scrolling, the 60ms
+        # pump owns repaints -- flushing here too would inject an extra scroll step
+        # -- so only flush ourselves when nothing is scrolling.
         self.set_media(image=media, update=False)
-        self.get_input().update()
+        if not self._is_scrolling():
+            self.get_input().update()
+
+    @staticmethod
+    def first(value):
+        """MediaController returns metadata as a single-item list (or None)."""
+        if isinstance(value, list):
+            return value[0] if value else None
+        return value
 
 class ThumbnailBackground(MediaAction):
     """
